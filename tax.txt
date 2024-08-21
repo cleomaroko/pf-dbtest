@@ -1,0 +1,4 @@
+Stake tax 12.5%	Ksh 100 -> Ksh 12.5
+Winnnings tax 20% if profit is Ksh 20 the tax is 20% of Ksh 20 (aka withholding tax)
+If player loses the company pays 15% tax 
+GGR tax the company pays every day for every round

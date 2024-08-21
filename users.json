@@ -1,0 +1,16 @@
+[
+  {
+    "username": "danny",
+    "userID": "001",
+    "password": "123",
+    "balance": 50,
+    "phoneNumber": "0727376519"
+  },
+  {
+    "username": "cleo",
+    "userID": "002",
+    "password": "mypassword",
+    "balance": 0,
+    "phoneNumber": "0710789564"
+  }
+]
