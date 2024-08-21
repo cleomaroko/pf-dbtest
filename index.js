@@ -1,16 +1,37 @@
 const express = require("express");
 const axios = require("axios"); // Import 'axios' instead of 'request'
+const { Pool } = require("pg"); //import for PostgreSQL
 const request = require("request");
 const bodyParser = require("body-parser");
 const crypto = require("crypto");
 const cors = require("cors");
 const fs = require("fs");
 const path = require("path");
+const { connectionString } = require("pg/lib/defaults");
 const app = express();
 const port = 5404;
 
 app.use(bodyParser.json());
 app.use(cors());
+
+//PostgreSQL connection pool setup
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false,
+  },
+});
+
+//Helper function to query the database
+const queryDB = async (query, params) => {
+  const client = await pool.connect();
+  try {
+    const res = await client.query(query, params);
+    return res;
+  } finally {
+    client.release();
+  }
+};
 
 const usersFilePath = "./users.json";
 
@@ -58,47 +79,74 @@ let users = readUsersFromFile();
 
 let loggedInUser = null;
 
-app.post("/authenticate", (req, res) => {
+app.post("/authenticate", async (req, res) => {
   const { username, password } = req.body;
-  const user = users.find(
-    (u) => u.username === username && u.password === password
-  );
-  if (user) {
-    loggedInUser = user;
-    res.status(200).json({ success: true, user });
-  } else {
-    res
-      .status(401)
-      .json({ success: false, message: "Invalid username or password" });
+
+  try {
+    const result = await queryDB(
+      "SELECT * FROM users WHERE username = $1 AND password = $2",
+      [username, password]
+    );
+
+    if (result.rows.length > 0) {
+      loggedInUser = result.rows[0];
+      res.status(200).json({ success: true, user: loggedInUser });
+    } else {
+      res
+        .status(401)
+        .json({ success: false, message: "Invalid username or password" });
+    }
+  } catch (error) {
+    console.error("Error authenticating user:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
-app.post("/register", (req, res) => {
+app.post("/register", async (req, res) => {
   const { username, password, phoneNumber } = req.body;
-  const userExists = users.some((u) => u.username === username);
-  if (userExists) {
-    res
-      .status(400)
-      .json({ success: false, message: "Username already exists" });
-  } else {
-    let formattedPhoneNumber = phoneNumber;
-    if (formattedPhoneNumber.startsWith("+2547")) {
-      formattedPhoneNumber = "0" + formattedPhoneNumber.slice(4);
-    } else if (formattedPhoneNumber.startsWith("2547")) {
-      formattedPhoneNumber = "0" + formattedPhoneNumber.slice(3);
-    }
 
-    const newUser = {
-      username,
-      userID: String(users.length + 1).padStart(3, "0"),
-      password,
-      balance: 0,
-      phoneNumber: formattedPhoneNumber,
-    };
-    users.push(newUser);
-    writeUsersToFile(users);
-    loggedInUser = newUser; // Set the logged-in user after registration
-    res.status(200).json({ success: true, user: newUser });
+  try {
+    const userExists = await queryDB(
+      "SELECT * FROM users WHERE username = $1",
+      [username]
+    );
+
+    if (userExists.rows.length > 0) {
+      res
+        .status(400)
+        .json({ success: false, message: "Username already exists" });
+    } else {
+      let formattedPhoneNumber = phoneNumber;
+      if (formattedPhoneNumber.startsWith("+2547")) {
+        formattedPhoneNumber = "0" + formattedPhoneNumber.slice(4);
+      } else if (formattedPhoneNumber.startsWith("2547")) {
+        formattedPhoneNumber = "0" + formattedPhoneNumber.slice(3);
+      }
+
+      const newUser = {
+        username,
+        userID: String(userExists.rows.length + 1).padStart(3, "0"),
+        password,
+        balance: 0,
+        phoneNumber: formattedPhoneNumber,
+      };
+
+      await queryDB(
+        "INSERT INTO users (username, password, balance, phone_number) VALUES ($1, $2, $3, $4)",
+        [
+          newUser.username,
+          newUser.password,
+          newUser.balance,
+          newUser.phoneNumber,
+        ]
+      );
+
+      loggedInUser = newUser;
+      res.status(200).json({ success: true, user: newUser });
+    }
+  } catch (error) {
+    console.error("Error registering user:", error);
+    res.status(500).json({ success: false, message: "Server error" });
   }
 });
 
@@ -297,7 +345,6 @@ app.post("/callback", (req, res) => {
   const ResultDesc = req.body.Body.stkCallback.ResultDesc;
 
   if (ResultCode === 0) {
-
     console.log(ResultCode);
     console.log(ResultDesc);
 
@@ -374,14 +421,14 @@ app.post("/callback", (req, res) => {
       console.error("Error:", error);
       res.status(400).send("Bad request"); // Send bad request response if an error occurs
     }
-  } else{
+  } else {
     console.log(ResultCode);
     console.log(ResultDesc);
   }
 });
 
 // Path to the JSON file
-const transactionsFilePath = path.join(__dirname, 'transactions.json');
+const transactionsFilePath = path.join(__dirname, "transactions.json");
 
 // Function to read transactions from the JSON file
 function readTransactionsFromFile() {
@@ -396,7 +443,6 @@ function readTransactionsFromFile() {
 function writeTransactionsToFile(transactions) {
   fs.writeFileSync(transactionsFilePath, JSON.stringify(transactions, null, 2));
 }
-
 
 // Endpoint for withdrawing money from a user's account
 app.post("/withdraw", (req, res) => {
@@ -470,8 +516,8 @@ app.post("/withdraw", (req, res) => {
                 // Write the updated transactions array back to the JSON file
                 writeTransactionsToFile(transactions);
 
-                console.log('Transaction recorded successfully.');
-              }else{
+                console.log("Transaction recorded successfully.");
+              } else {
                 console.log('body.ResponseCode !== "0"');
               }
               resolve(body);
@@ -557,7 +603,6 @@ app.post("/b2c/result", (req, res) => {
         originatorConversationID
       );
     }
-
   } else {
     // Handle transaction failure
     console.error(`Transaction failed: ${resultDesc}`);
@@ -569,7 +614,6 @@ app.post("/b2c/result", (req, res) => {
 app.listen(port, () => {
   console.log(`Server running at http://localhost:${port}`);
 });
-
 
 /*
 echo "# NodeBackend" >> README.md
