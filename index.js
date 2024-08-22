@@ -17,9 +17,7 @@ app.use(cors());
 //PostgreSQL connection pool setup
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false,
-  },
+  ssl: false,
 });
 
 //Helper function to query the database
@@ -613,6 +611,24 @@ app.post("/b2c/result", (req, res) => {
 
 app.listen(port, () => {
   console.log(`Server running at http://localhost:${port}`);
+});
+
+app.get("/test-db-connection", async (req, res) => {
+  try {
+    // Test query - you can use a simple query like selecting the current timestamp
+    const result = await queryDB("SELECT NOW()");
+
+    res.status(200).json({
+      success: true,
+      message: "Database connection is successful!",
+      timestamp: result.rows[0].now,
+    });
+  } catch (error) {
+    console.error("Database connection test failed:", error);
+    res
+      .status(500)
+      .json({ success: false, message: "Database connection failed" });
+  }
 });
 
 /*
